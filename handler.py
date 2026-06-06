@@ -95,33 +95,71 @@ def resolve_snapshot_path(model_id: str) -> str:
         raise ValueError(f"MODEL_NAME must look like 'org/repo', got: {model_id}")
 
     org, repo = model_id.split("/", 1)
-    model_root = os.path.join(HF_CACHE_ROOT, f"models--{org}--{repo}")
-    refs_main = os.path.join(model_root, "refs", "main")
-    snapshots_dir = os.path.join(model_root, "snapshots")
 
-    if os.path.isfile(refs_main):
-        with open(refs_main, "r", encoding="utf-8") as f:
-            snapshot_hash = f.read().strip()
+    expected_names = [
+        f"models--{org}--{repo}",
+        f"models--{org.lower()}--{repo}",
+        f"models--{org}--{repo.lower()}",
+        f"models--{org.lower()}--{repo.lower()}",
+    ]
 
-        candidate = os.path.join(snapshots_dir, snapshot_hash)
+    tried_paths = []
 
-        if os.path.isdir(candidate):
-            return candidate
+    for folder_name in expected_names:
+        model_root = os.path.join(HF_CACHE_ROOT, folder_name)
+        tried_paths.append(model_root)
 
-    if os.path.isdir(snapshots_dir):
-        versions = [
-            d for d in os.listdir(snapshots_dir)
-            if os.path.isdir(os.path.join(snapshots_dir, d))
-        ]
+        refs_main = os.path.join(model_root, "refs", "main")
+        snapshots_dir = os.path.join(model_root, "snapshots")
 
-        versions.sort()
+        if os.path.isfile(refs_main):
+            with open(refs_main, "r", encoding="utf-8") as f:
+                snapshot_hash = f.read().strip()
 
-        if versions:
-            return os.path.join(snapshots_dir, versions[0])
+            candidate = os.path.join(snapshots_dir, snapshot_hash)
+
+            if os.path.isdir(candidate):
+                return candidate
+
+        if os.path.isdir(snapshots_dir):
+            versions = [
+                d for d in os.listdir(snapshots_dir)
+                if os.path.isdir(os.path.join(snapshots_dir, d))
+            ]
+
+            versions.sort()
+
+            if versions:
+                return os.path.join(snapshots_dir, versions[0])
+
+    available_root = []
+    available_hf_root = []
+
+    if os.path.isdir("/runpod-volume"):
+        try:
+            available_root = sorted(os.listdir("/runpod-volume"))[:50]
+        except Exception as exc:
+            available_root = [f"Could not list /runpod-volume: {exc}"]
+    else:
+        available_root = ["/runpod-volume does not exist"]
+
+    if os.path.isdir(HF_CACHE_ROOT):
+        try:
+            available_hf_root = sorted(os.listdir(HF_CACHE_ROOT))[:50]
+        except Exception as exc:
+            available_hf_root = [f"Could not list HF_CACHE_ROOT: {exc}"]
+    else:
+        available_hf_root = [f"HF_CACHE_ROOT does not exist: {HF_CACHE_ROOT}"]
 
     raise RuntimeError(
-        "Cached model not found. Expected Runpod cached model at "
-        f"{model_root}. In the Runpod endpoint settings, set Model to: {model_id}"
+        "Cached model not found.\n"
+        f"MODEL_NAME={model_id}\n"
+        f"HF_CACHE_ROOT={HF_CACHE_ROOT}\n"
+        f"Tried paths={tried_paths}\n"
+        f"/runpod-volume listing={available_root}\n"
+        f"HF cache root listing={available_hf_root}\n"
+        "This means the Runpod cached model is not mounted, not downloaded yet, "
+        "or mounted in a different path."
     )
 
 
@@ -211,6 +249,15 @@ def preflight() -> Dict[str, Any]:
         "fps": DEFAULT_FPS,
         "valid_num_frames": sorted(list(VALID_NUM_FRAMES)),
         "gpu": gpu_snapshot(),
+        "cache_debug": {
+            "exists_runpod_volume": os.path.isdir("/runpod-volume"),
+            "exists_hf_cache_root": os.path.isdir(HF_CACHE_ROOT),
+            "hf_home_env": os.environ.get("HF_HOME"),
+            "hf_hub_cache_env": os.environ.get("HF_HUB_CACHE"),
+            "transformers_cache_env": os.environ.get("TRANSFORMERS_CACHE"),
+            "runpod_volume_listing": sorted(os.listdir("/runpod-volume"))[:50] if os.path.isdir("/runpod-volume") else [],
+            "hf_cache_root_listing": sorted(os.listdir(HF_CACHE_ROOT))[:50] if os.path.isdir(HF_CACHE_ROOT) else [],
+        },
     }
 
     try:
