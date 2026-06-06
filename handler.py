@@ -283,17 +283,22 @@ def download_file(url: str, dest_path: str, timeout_seconds: int = 60):
 
 
 def upload_file_to_signed_url(local_path: str, upload_url: str):
+    file_size = os.path.getsize(local_path)
+
     headers = {
-        "Content-Type": "video/mp4",
+        "content-type": "video/mp4",
+        "content-length": str(file_size),
     }
 
     with open(local_path, "rb") as f:
-        response = requests.put(
-            upload_url,
-            data=f,
-            headers=headers,
-            timeout=(15, 600),
-        )
+        data = f.read()
+
+    response = requests.put(
+        upload_url,
+        data=data,
+        headers=headers,
+        timeout=(15, 600),
+    )
 
     if response.status_code < 200 or response.status_code >= 300:
         raise RuntimeError(
@@ -358,6 +363,8 @@ def generate(job_input: Dict[str, Any]) -> Dict[str, Any]:
 
         if not os.path.isfile(final_mp4_path):
             raise RuntimeError(f"Expected MP4 was not created: {final_mp4_path}")
+
+        metrics["local_mp4_size_bytes"] = os.path.getsize(final_mp4_path)
 
         t = now()
         upload_file_to_signed_url(final_mp4_path, upload_url)
