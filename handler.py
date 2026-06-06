@@ -376,7 +376,7 @@ def generate(job_input: Dict[str, Any]) -> Dict[str, Any]:
     work_dir = Path("/tmp/dreamo_ltx_jobs") / job_id
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    input_image_path = str(work_dir / "input_image")
+    input_image_path = str(work_dir / "input_image.png")
     final_mp4_path = str(work_dir / "output_832x480.mp4")
 
     metrics: Dict[str, Any] = {}
@@ -466,6 +466,17 @@ def handler(job):
 
         if action == "preflight":
             return preflight()
+
+        if action == "native_env_check":
+            model_dir, model_info = get_model_dir()
+            from dreamo_ltx_pipeline import native_environment_check
+
+            return {
+                "status": "success",
+                "action": "native_env_check",
+                "model_info": model_info,
+                "native": native_environment_check(model_dir),
+            }
 
         if action == "load_model":
             pipeline, info = get_pipeline()
