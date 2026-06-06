@@ -1,0 +1,18 @@
+runpod>=1.7.0
+jupyterlab>=4.0.0
+requests>=2.31.0
+pillow>=10.0.0
+numpy>=1.26.0
+imageio>=2.34.0
+imageio-ffmpeg>=0.5.1
+safetensors>=0.5.3
+transformers>=4.52.0
+accelerate>=1.8.0
+sentencepiece>=0.2.0
+protobuf>=5.0.0
+hf_transfer>=0.1.9
+
+# Native LTX packages.
+# Later, pin these to a tested commit.
+git+https://github.com/Lightricks/LTX-2.git#subdirectory=packages/ltx-core
+git+https://github.com/Lightricks/LTX-2.git#subdirectory=packages/ltx-pipelines
