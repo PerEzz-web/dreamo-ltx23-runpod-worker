@@ -67,10 +67,14 @@ def discover_runtime_files(model_dir: str) -> Dict[str, str]:
     """
     Finds the files inside the cached Dreamo HF model snapshot.
 
-    Expected current repo layout:
-      checkpoints/ltx-2.3-22b-distilled-fp8.safetensors
-      upscalers/ltx-2.3-spatial-upscaler-x2-1.1.safetensors
-      text_encoders/gemma-3-12b-it-qat-q4_0-unquantized/...
+    Preferred production checkpoint:
+      checkpoints/ltx-2.3-22b-distilled-1.1.safetensors
+
+    This is the BF16 distilled checkpoint. We then use:
+      LTX_QUANTIZATION=fp8-cast
+
+    Avoid using the FP8 checkpoint with this native loader path because it failed with:
+      KeyError: attn1.to_gate_logits.input_scale
     """
 
     base = Path(model_dir)
@@ -78,26 +82,60 @@ def discover_runtime_files(model_dir: str) -> Dict[str, str]:
     if not base.exists():
         raise RuntimeError(f"model_dir does not exist: {model_dir}")
 
-    checkpoint_candidates = []
+    # Prefer explicit env var, defaulting to BF16 distilled checkpoint.
+    checkpoint_glob = os.environ.get(
+        "LTX_CHECKPOINT_GLOB",
+        "checkpoints/ltx-2.3-22b-distilled-1.1.safetensors",
+    )
 
-    # Prefer distilled checkpoint, but avoid LoRA files.
-    for pattern in [
-        "checkpoints/*distilled*.safetensors",
-        "*checkpoints*/*distilled*.safetensors",
-        "**/*distilled*.safetensors",
-    ]:
-        checkpoint_candidates.extend(base.glob(pattern))
-        checkpoint_candidates.extend(base.rglob(pattern))
+    checkpoint_candidates = []
+    checkpoint_candidates.extend(base.glob(checkpoint_glob))
+    checkpoint_candidates.extend(base.rglob(checkpoint_glob))
+
+    # Fallbacks: still prefer non-FP8 distilled files.
+    if not checkpoint_candidates:
+        fallback_patterns = [
+            "checkpoints/*distilled-1.1.safetensors",
+            "**/*distilled-1.1.safetensors",
+            "checkpoints/*distilled*.safetensors",
+            "**/*distilled*.safetensors",
+        ]
+
+        for pattern in fallback_patterns:
+            checkpoint_candidates.extend(base.glob(pattern))
+            checkpoint_candidates.extend(base.rglob(pattern))
 
     checkpoint_candidates = [
         p for p in _unique_sorted(checkpoint_candidates)
-        if p.is_file() and "lora" not in p.name.lower()
+        if p.is_file()
+        and "lora" not in p.name.lower()
+        and "fp8" not in p.name.lower()
     ]
 
+    # Only allow FP8 checkpoint if explicitly requested.
+    if not checkpoint_candidates and os.environ.get("ALLOW_FP8_CHECKPOINT", "0") == "1":
+        for pattern in [
+            "checkpoints/*distilled-fp8*.safetensors",
+            "**/*distilled-fp8*.safetensors",
+        ]:
+            checkpoint_candidates.extend(base.glob(pattern))
+            checkpoint_candidates.extend(base.rglob(pattern))
+
+        checkpoint_candidates = [
+            p for p in _unique_sorted(checkpoint_candidates)
+            if p.is_file() and "lora" not in p.name.lower()
+        ]
+
     if not checkpoint_candidates:
+        available = []
+        for p in base.rglob("*.safetensors"):
+            available.append(str(p.relative_to(base)))
+        available = sorted(available)[:100]
+
         raise RuntimeError(
-            f"Could not find LTX distilled checkpoint under {base}. "
-            "Expected something like checkpoints/ltx-2.3-22b-distilled-fp8.safetensors"
+            f"Could not find compatible BF16 LTX distilled checkpoint under {base}. "
+            "Expected checkpoints/ltx-2.3-22b-distilled-1.1.safetensors. "
+            f"Available safetensors files: {available}"
         )
 
     checkpoint_path = str(checkpoint_candidates[0])
@@ -126,7 +164,6 @@ def discover_runtime_files(model_dir: str) -> Dict[str, str]:
         "spatial_upsampler_path": upscaler_path,
         "gemma_root": gemma_root,
     }
-
 
 def native_environment_check(model_dir: str) -> Dict:
     """
